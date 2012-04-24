@@ -14,7 +14,7 @@ func main() {
 	//blue := pf.NewColor(0,0,1,1)
 	//red := pf.NewColor(1,0,0,1)
 	
-	sim.AddBuilding(20, 50, 50, 100)
+	sim.AddBuilding(100, 50, 50, 80)
 	//sim.AddBuilding(50, 150, 100, 50)
 	//sim.AddBuilding(50, 25, 100, 25)
 	

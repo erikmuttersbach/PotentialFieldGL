@@ -2,6 +2,7 @@ package pf
 
 import (
 	"math"
+	"geo"
 )
 
 type Pos struct {
@@ -30,6 +31,10 @@ func P(x,y int) Pos {
 
 func P64(x,y float64) Pos {
 	return Pos{x: x, y: y}
+}
+
+func (p *Pos) V() *geo.Vec {
+	return &geo.Vec{p.x, p.y}
 }
 
 

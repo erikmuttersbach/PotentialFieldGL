@@ -5,6 +5,10 @@ import (
 	"math"
 	"time"
 	"math2"
+	"geo"
+	
+	"container/list"
+	
 	"github.com/banthar/gl"
 	"github.com/banthar/Go-SDL/sdl"
 )
@@ -24,6 +28,8 @@ type Sim struct {
 	buildings map[int]*building
 	static [][]float64
 	nav *NavMesh	// List of Polygons
+	
+	markedNodes map[*NavNode]bool
 	
 	ui *UI
 	
@@ -51,7 +57,8 @@ func NewSim() *Sim {
 		buildings: make(map[int]*building),
 		ui: InitUI(),
 		run: false,
-		nav: NewNavMesh(),
+		nav: nil,
+		markedNodes: make(map[*NavNode]bool),
 	}
 	
 	// Init static potential field
@@ -66,153 +73,80 @@ func NewSim() *Sim {
 	return s
 }
 
-func (s *Sim) Init2() {
-	/*poly1 := []*Pos{
-		&Pos{0, 50},
-		&Pos{50, 0}, 
-		&Pos{50, 150},
-		&Pos{0, 100},
-	}
-	node1 := NewNavNode(&Polygon{poly1})
-	s.nav.nodes.PushBack(node1)
-	
-	poly2 := []*Pos{
-		&Pos{200, 0},
-		&Pos{200, 150}, 
-		&Pos{50, 150},
-		&Pos{50, 0},
-	}
-	node2 := NewNavNode(&Polygon{poly2})
-	e2 := s.nav.nodes.PushBack(node2)
-	
-	node1.Merge(node2)
-	s.nav.nodes.Remove(e2)
-	
-	fmt.Println(node1, node1.node.IsConvex())*/
-	
-	poly1 := []*Pos{
-		&Pos{0, 50},
-		&Pos{50, 0}, 
-		&Pos{100, 0},
-		&Pos{150, 0},
-		&Pos{50, 150},
-		&Pos{0, 100},
-	}
-	node1 := NewNavNode(&Polygon{poly1})
-	s.nav.nodes.PushBack(node1)
-	
-	fmt.Println(node1.node.IsConvex())
-	
-}
-
 func (s *Sim) Init() {
-	/*s.nav.PushFront(&Polygon{
-		points: []Pos{
-			Pos{x: 1, y: 1},
-			Pos{x: 50, y: 1},
-			Pos{x: 50, y: 50},
-			Pos{x: 1, y: 50},
-		},
-	})*/
 	
-	outers := []*Pos{
-		&Pos{0, 0},
-		&Pos{299, 0},
-		&Pos{299, 299},
-		&Pos{0, 299},
+	outers := []*geo.Vec{
+		&geo.Vec{0, 0},
+		&geo.Vec{299, 0},
+		&geo.Vec{299, 299},
+		&geo.Vec{0, 299},
 	}
+	startPoly := &geo.Polygon{outers}
+	
+	polySoup := list.New() 
 	
 	for _, building := range s.buildings {
-		inners := []*Pos{
-			&Pos{building.x, building.y},
-			&Pos{building.x+building.w, building.y},
-			&Pos{building.x+building.w, building.y+building.h},
-			&Pos{building.x, building.y+building.h},
+		inners := []*geo.Vec{
+			&geo.Vec{building.x+building.w, building.y+building.h},
+			&geo.Vec{building.x, building.y+building.h},
+			&geo.Vec{building.x, building.y},
+			&geo.Vec{building.x+building.w, building.y},
 		}
+		innerPoly := &geo.Polygon{inners}
 		
-		var prev *NavNode
-		for i_inner, inner := range inners {
-		
-			tri1 := []*Pos{
-				outers[i_inner],
-				outers[(i_inner+1)%len(outers)], 
-				inner, 
+		for outer_i, outer := range outers {
+			doBreak := false
+			for inner_i, inner := range inners {
+				//fmt.Println(outer, inner)
+				pts := innerPoly.IntersectLine(outer, inner.Sub(outer)).Elements()
+				if len(pts) > 0 {
+					if len(pts) > 1 || pts[0].(geo.Vec) != *inner {
+						break
+					}
+				}
+			
+				if startPoly.ContainsCornerLine(outer_i, inner) {
+					
+					newPoly := make([]*geo.Vec, len(inners)+len(outers)+2)
+					i := 0
+					for ; i<=len(outers) ; i++ {
+						newPoly[i] = outers[(outer_i+i)%len(outers)]
+					}
+					
+					for ii:=0; i<=len(outers) + len(inners); ii++ {
+						offset := (inner_i+len(inners)-ii)%len(inners)
+						newPoly[i] = inners[offset]
+						i++
+					}
+					
+					newPoly[i] = inners[0]
+					
+					// Triangulate the concave polygon
+					tris := (&geo.Polygon{newPoly}).Triangulate()
+					polySoup.PushBackList(tris)
+						
+					// We were able to insert the building, so break		
+					doBreak = true
+					break
+				}
 			}
-			node1 := NewNavNode(&Polygon{tri1})
 			
-			tri2 := []*Pos{
-				outers[(i_inner+1)%len(outers)],
-				inners[(i_inner+1)%len(inners)],
-				inner, 
+			if doBreak {
+				break
 			}
-			node2 := NewNavNode(&Polygon{tri2})
-			
-			// Connect the links
-			if(prev != nil) {
-				node1.links[2] = prev
-				prev.links[0] = node1
-			}
-			node1.links[1] = node2
-			node2.links[2] = node1
-			
-			s.nav.nodes.PushBack(node1)
-			s.nav.nodes.PushBack(node2)
-			
-			prev = node2
-		}	
-		
-		firstNode := s.nav.nodes.Front().Value.(*NavNode)
-		firstNode.links[2] = prev
-		prev.links[0] = firstNode
+		}
 	}
-	
+
+	s.nav = NewNavMesh(polySoup)	
 	s.nav.Reduce()
-	fmt.Println("\n", s.nav.nodes.Back().Value)
-	/*
 	
-	
-	node1 := s.nav.nodes.Front().Value.(*NavNode)
-	node2 := s.nav.nodes.Front().Next().Value.(*NavNode)
-	//fmt.Println(node1)
-	//fmt.Println(node2)
-	
-	fmt.Println()
-	new1 := node1.Merge(node2)
-	
-	s.nav.nodes.Front().Value = new1
-	s.nav.nodes.Remove(s.nav.nodes.Front().Next())
-	//fmt.Println(new1)
-	
-	fmt.Println("\nSECOND MERGE")
-	node1 = s.nav.nodes.Front().Value.(*NavNode)
-	node2 = s.nav.nodes.Back().Value.(*NavNode)
-	
-	fmt.Println(node1)
-	fmt.Println(node2)
-	fmt.Println()
-	
-	new2 := node1.Merge(node2)
-	fmt.Println(new2)
-	
-	s.nav.nodes.Front().Value = new2
-	s.nav.nodes.Remove(s.nav.nodes.Back())
-	fmt.Println(new2.node.IsConvex())*/
-	
-	// TWO-A
-	/*node2 = s.nav.nodes.Front().Next().Value.(*NavNode)
-	node3 := s.nav.nodes.Front().Next().Next().Value.(*NavNode)
-	node2.Link(node3)
-	s.nav.nodes.Remove(s.nav.nodes.Front().Next().Next())
-	
-	fmt.Println(node2.node)
-	
-	// TWO-A
-	node2 = s.nav.nodes.Front().Next().Value.(*NavNode)
-	node3 = s.nav.nodes.Front().Next().Next().Value.(*NavNode)
-	node2.Link(node3)
-	s.nav.nodes.Remove(s.nav.nodes.Front().Next().Next())
-	
-	fmt.Println(node2.node)	*/
+	start := s.nav.nodes.Front().Value.(*NavNode)
+	end := s.nav.nodes.Back().Value.(*NavNode)
+	path := FindPath(start, end)
+	for e:=path.Front(); e != nil; e = e.Next() {
+		nn := e.Value.(*NavNode)
+		s.markedNodes[nn] = true
+	}
 }
 
 func findNearest(pos *Pos, search []*Pos) int {
@@ -416,29 +350,49 @@ func (s *Sim) Draw() {
 	
 	// Nav mesh
 	for e := s.nav.nodes.Front(); e != nil; e = e.Next() {
-		poly := e.Value.(*NavNode)
+		nn := e.Value.(*NavNode)
 
 		gl.Color4f(0, 0, 1, 0.2)
+		
+		if s.markedNodes[nn] {
+			gl.Color4f(1, 0, 0, 0.2)
+		}
+		
 		gl.Begin(gl.POLYGON)
-		for _, pos := range poly.node.points {
+		for _, pos := range nn.node.Points {
 			if pos == nil {
 				continue
 			}
 			
-			gl.Vertex2f(float32(pos.x), float32(pos.y))
+			gl.Vertex2f(float32(pos.X), float32(pos.Y))
 		}
 		gl.End()
 		
 		gl.Color4f(0, 0, 1, 1)
 		gl.Begin(gl.LINE_LOOP)
-		for _, pos := range poly.node.points {
+		for _, pos := range nn.node.Points {
 			if pos == nil {
 				continue
 			}
 			
-			gl.Vertex2f(float32(pos.x), float32(pos.y))
+			gl.Vertex2f(float32(pos.X), float32(pos.Y))
 		}
 		gl.End()
+		
+		// Draw Links
+		/*gl.Color4f(1, 0, 0, 1)
+		gl.Begin(gl.LINES)
+		for i, link := range nn.links {
+			pt1 := nn.node.Points[i]
+			pt2 := nn.node.Points[(i+1)%nn.node.Len()]
+			lineCenter := &geo.Vec{(pt1.X+pt2.X)/2, (pt1.Y+pt2.Y)/2}
+			
+			center := link.node.Center()
+			
+			gl.Vertex2d(lineCenter.X, lineCenter.Y)
+			gl.Vertex2d(center.X, center.Y)
+		}
+		gl.End()*/
 	}
 	
 	/*

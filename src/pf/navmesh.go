@@ -3,6 +3,8 @@ package pf
 import (
 	"container/list"	
 	"fmt"
+	"geo"
+	"graph"
 )
 
 type NavMesh struct {
@@ -10,17 +12,61 @@ type NavMesh struct {
 }
 
 type NavNode struct {
-	node *Polygon
+	node *geo.Polygon
 	links map[int]*NavNode
 }
 
-func NewNavMesh() *NavMesh {
-	return &NavMesh{
-		list.New(),
-	}
+type line struct {
+	p1, p2 geo.Vec
 }
 
-func NewNavNode(node *Polygon) *NavNode {
+type adjacent struct {
+	a *NavNode
+	a_i int
+	b *NavNode
+	b_i int
+}
+
+func NewNavMesh(soup *list.List) *NavMesh {
+	nm := &NavMesh{
+		list.New(),
+	}
+	
+	lines := make(map[line]*adjacent)
+	
+	for e := soup.Front(); e != nil; e = e.Next() {
+		nn := NewNavNode(e.Value.(*geo.Polygon))
+		nm.nodes.PushBack(nn)
+		
+		for i, pt1 := range nn.node.Points {
+			pt2 := nn.node.Points[(i+1)%nn.node.Len()]
+			ll := line{*pt1, *pt2}
+			if pt2.X < pt1.X {
+				ll = line{*pt2, *pt1}
+			}
+			//fmt.Println("Checking ", lines[ll])
+			
+			if lines[ll] == nil {
+				lines[ll] = &adjacent{nn, i, nil, 0}
+			} else {
+				lines[ll].b = nn
+				lines[ll].b_i = i
+			}
+		}
+	}
+	
+	
+	for _, adj := range lines {
+		if adj.b != nil {
+			adj.a.links[adj.a_i] = adj.b
+			adj.b.links[adj.b_i] = adj.a
+		}
+	}
+	
+	return nm
+}
+
+func NewNavNode(node *geo.Polygon) *NavNode {
 	return &NavNode{
 		node: node,
 		links: make(map[int]*NavNode),
@@ -36,8 +82,22 @@ func (nn *NavNode) String() string {
 	return str
 }
 
-func (nn *NavNode) HasCorner(pos *Pos) int {
-	for i, p := range nn.node.points {
+func (nn *NavNode) C(other graph.Node) float64 {
+	return nn.node.Center().Distance(other.(*NavNode).node.Center())
+}
+
+func (nn *NavNode) GetLinks() []graph.Node {
+	nodes := make([]graph.Node, len(nn.links))
+	i:= 0
+	for _, node := range nn.links {
+		nodes[i] = node
+		i++
+	}
+	return nodes;
+}
+
+func (nn *NavNode) HasCorner(pos *geo.Vec) int {
+	for i, p := range nn.node.Points {
 		if *p == *pos {
 			return i
 		}
@@ -49,11 +109,11 @@ func (nn *NavNode) HasCorner(pos *Pos) int {
 func (nn *NavNode) Merge(other *NavNode) *NavNode {
 	_ = fmt.Println
 	
-	for this_i, this_corner := range nn.node.points {
+	for this_i, this_corner := range nn.node.Points {
 		if other_i := other.HasCorner(this_corner); other_i >= 0 {
 			
-			newPoly := &Polygon{
-				make([]*Pos, nn.node.Len()+other.node.Len()-2),
+			newPoly := &geo.Polygon{
+				make([]*geo.Vec, nn.node.Len()+other.node.Len()-2),
 			}
 			
 			newLinks := make(map[int]*NavNode)
@@ -61,7 +121,7 @@ func (nn *NavNode) Merge(other *NavNode) *NavNode {
 			i := 0
 			for ; i<other.node.Len(); i++ {
 				offset := (other_i+i)%other.node.Len()
-				newPoly.points[i] = other.node.points[offset]
+				newPoly.Points[i] = other.node.Points[offset]
 				
 				if i<other.node.Len()-1 && other.links[offset] != nil {
 					newLinks[i] = other.links[offset]
@@ -70,7 +130,7 @@ func (nn *NavNode) Merge(other *NavNode) *NavNode {
 			for ; i < nn.node.Len()+other.node.Len()-2; i++ {
 				offset := (i-other.node.Len()+this_i+2)%nn.node.Len()
 				linkOffset := (i-other.node.Len()+this_i+2-1)%nn.node.Len()
-				newPoly.points[i] = nn.node.points[offset]
+				newPoly.Points[i] = nn.node.Points[offset]
 				
 				if nn.links[linkOffset] != nil {
 					newLinks[i-1] = nn.links[linkOffset]
@@ -93,7 +153,6 @@ func (nm *NavMesh) Reduce() {
 }
 
 func (nm *NavMesh) reduce(reduced *map[*NavNode]bool, nn *NavNode) {
-	fmt.Println("\nReducing", nn.node)
 	// Try to reduce this node
 	for canReduce := true; canReduce ; {
 		for _, candidate := range nn.links {
