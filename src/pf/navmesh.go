@@ -210,3 +210,14 @@ func (nm *NavMesh) RemoveNode(search *NavNode) bool {
 	return false
 }
 
+func (nm *NavMesh) NodeAtPoint(pt *geo.Vec) *NavNode {
+	for e := nm.nodes.Front(); e != nil; e = e.Next() {
+		node := e.Value.(*NavNode)
+		if node.node.ContainsPoint(pt) {
+			return node
+		}
+	}
+	
+	return nil
+}
+

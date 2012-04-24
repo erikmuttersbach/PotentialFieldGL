@@ -6,9 +6,17 @@ import (
 	"container/list"
 	"fmt"
 	"graph"
+	"geo"
 )
 
-func FindPath(start, end graph.Node) *list.List {
+func FindPath(s *Sim, start, end *geo.Vec) *list.List {
+	startNode := s.nav.NodeAtPoint(start)
+	endNode := s.nav.NodeAtPoint(end)
+	path1 := findPath1(startNode, endNode)
+	return findPath2(s, start, end, path1)
+}
+
+func findPath1(start, end graph.Node) *list.List {
 	openlist := pq.New(1000) // TODO This is shit
 	closedlist := make(map[graph.Node]bool)
 	pre := make(map[graph.Node]graph.Node)
@@ -93,3 +101,91 @@ func FindPath(start, end graph.Node) *list.List {
 	return nil
 }
 
+func findPath2(s *Sim, start, end *geo.Vec, path1 *list.List) *list.List {
+	fmt.Println("Route from", start, end)
+	
+	la := list.New()
+	ra := list.New()
+	
+	la.PushBack(start)
+	ra.PushBack(start)
+	
+	// Is there a direct connection between start and end?
+	if !s.IntersectLine(start, end.Sub(start)) {
+		la.PushBack(end)
+		return la
+	}
+	
+	for e := path1.Front(); e != nil; e = e.Next() {
+		node := e.Value.(*NavNode)
+		fmt.Println("Looking at Poly", node)
+		
+		if e.Next() == nil {
+			continue
+		}
+		
+		var l, r *geo.Vec
+		
+		// Find the "port" to the next poly
+		for i, link :=range  node.links {
+			if link == e.Next().Value {
+				l = node.node.Points[i]
+				r = node.node.Points[(i+1)%node.node.Len()]
+			}
+		}
+		
+		_ = r
+		
+		if la.Back().Value != end {
+			fmt.Println(" Adding left port", l)
+			la.PushBack(l)	
+			
+			if !s.IntersectLine(l, end.Sub(l)) {
+				fmt.Println(" Found end (left)")
+				la.PushBack(end)
+			}
+		}
+		
+		if ra.Back().Value != end {
+			fmt.Println(" Adding right port", r)
+			ra.PushBack(r)	
+			
+			if !s.IntersectLine(r, end.Sub(r)) {
+				fmt.Println(" Found end (right)")
+				ra.PushBack(end)
+			}
+		}
+	}
+	
+	lengthl := 0.0
+	fmt.Println("left")
+	for e := la.Front(); e != nil; e = e.Next() {
+		fmt.Println(" ", e.Value)
+		
+		if e.Next() != nil {
+			this := e.Value.(*geo.Vec)
+			next := e.Next().Value.(*geo.Vec)
+			lengthl += this.Distance(next)
+		}
+	}
+	fmt.Println(" length:", lengthl)
+	
+	lengthr := 0.0
+	fmt.Println("right")
+	for e := ra.Front(); e != nil; e = e.Next() {
+		fmt.Println(" ", e.Value)
+		
+		if e.Next() != nil {
+			this := e.Value.(*geo.Vec)
+			next := e.Next().Value.(*geo.Vec)
+			lengthr += this.Distance(next)
+		}
+	}
+	fmt.Println(" length:", lengthr)
+	
+	if lengthr > lengthl {
+		return ra
+	}
+	
+	return la
+}

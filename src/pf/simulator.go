@@ -140,13 +140,16 @@ func (s *Sim) Init() {
 	s.nav = NewNavMesh(polySoup)	
 	s.nav.Reduce()
 	
-	start := s.nav.nodes.Front().Value.(*NavNode)
-	end := s.nav.nodes.Back().Value.(*NavNode)
-	path := FindPath(start, end)
-	for e:=path.Front(); e != nil; e = e.Next() {
+	//start := s.nav.nodes.Front().Value.(*NavNode)
+	//end := s.nav.nodes.Back().Value.(*NavNode)
+	//path := FindPath(start, end)
+	//FindPath2(s, &geo.Vec{250, 60}, &geo.Vec{20, 60}, path)
+	
+	/*for e:=path.Front(); e != nil; e = e.Next() {
 		nn := e.Value.(*NavNode)
 		s.markedNodes[nn] = true
-	}
+	}*/
+	_ = FindPath(s,  &geo.Vec{250, 60}, &geo.Vec{20, 60})
 }
 
 func findNearest(pos *Pos, search []*Pos) int {
@@ -162,6 +165,26 @@ func findNearest(pos *Pos, search []*Pos) int {
 	}
 	
 	return min_i
+}
+
+// TODO This should go to a separate Map struct
+// TODO What happens with the point-on-line intesection?
+func (s *Sim) IntersectLine(ap, av *geo.Vec) bool {
+	for _, building := range s.buildings {
+		poly := &geo.Polygon{[]*geo.Vec{
+			&geo.Vec{building.x+building.w, building.y+building.h},
+			&geo.Vec{building.x, building.y+building.h},
+			&geo.Vec{building.x, building.y},
+			&geo.Vec{building.x+building.w, building.y},
+		}}
+		
+		// if there is only one intersection, the line is only 
+		if poly.IntersectLine(ap, av).Len() > 1 {
+			return true
+		}
+	}
+	
+	return false
 }
 
 func (s *Sim) AddUnit(start, end Pos, color *Color) {
