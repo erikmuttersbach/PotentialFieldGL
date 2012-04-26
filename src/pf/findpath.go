@@ -184,8 +184,8 @@ func findPath2(s *Sim, start, end *geo.Vec, path1 *list.List) *list.List {
 	fmt.Println(" length:", lengthr)
 	
 	if lengthr > lengthl {
-		return ra
+		return la
 	}
 	
-	return la
+	return ra
 }

@@ -69,3 +69,22 @@ func IntersectLines2(ap, av, bp, bv *Vec) *Vec {
 	return nil
 }
 
+// Returns a vector, from pt to the line ab-av, orthogonal or nil
+func OrthogonalVector(pb, pv, ab *Vec) *Vec {
+	av := &Vec{1, -pv.X/pv.Y}
+	
+	if math.IsInf(av.Y, 0) {
+		av = &Vec{0, 1}
+	}
+	
+	u := (-pb.X*pv.Y+ab.X*pv.Y+(pb.Y-ab.Y)*pv.X)/(av.Y*pv.X-av.X*pv.Y)
+	v := -(av.X*(ab.Y-pb.Y)+av.Y*pb.X-ab.X*av.Y)/(av.Y*pv.X-av.X*pv.Y)
+	
+	//fmt.Println(pv, av, u, v)
+	
+	if v >= 0 && v <= 1 {
+		return av.Scale(u)
+	}
+	
+	return nil
+}

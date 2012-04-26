@@ -172,3 +172,15 @@ func TestIntersectLines2(t *testing.T) {
 		t.Fatal(ip)
 	}
 }
+
+func TestOrthogonalVector(t *testing.T) {
+	av := OrthogonalVector(&Vec{1,1}, &Vec{1,0}, &Vec{1.5,2})
+	if av == nil || (*av != Vec{0, -1}) {
+		t.Fatal(av)
+	}
+	
+	av = OrthogonalVector(&Vec{1,1}, &Vec{1,0}, &Vec{3,2})
+	if av != nil {
+		t.Fatal(av)
+	}
+}

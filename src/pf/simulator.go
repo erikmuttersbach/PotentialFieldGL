@@ -7,6 +7,8 @@ import (
 	"math2"
 	"geo"
 	
+	//"sdl/ttf"
+	
 	"container/list"
 	
 	"github.com/banthar/gl"
@@ -16,11 +18,14 @@ import (
 
 type unit struct {
 	id int
-	pos Pos
-	end Pos
+	pos geo.Vec
+	
+	start, end geo.Vec
 	
 	trail *Ringbuffer
 	color *Color
+	
+	path *list.List
 }
 
 type Sim struct {
@@ -28,8 +33,10 @@ type Sim struct {
 	buildings map[int]*building
 	static [][]float64
 	nav *NavMesh	// List of Polygons
-	
+
+	// temp	
 	markedNodes map[*NavNode]bool
+	path *list.List
 	
 	ui *UI
 	
@@ -149,22 +156,8 @@ func (s *Sim) Init() {
 		nn := e.Value.(*NavNode)
 		s.markedNodes[nn] = true
 	}*/
-	_ = FindPath(s,  &geo.Vec{250, 60}, &geo.Vec{20, 60})
-}
-
-func findNearest(pos *Pos, search []*Pos) int {
-	minDist := math.MaxFloat64
-	min_i := 0
 	
-	for i, p := range search {
-		dist := p.Distance(*pos)
-		if dist < minDist {
-			minDist = dist
-			min_i = i
-		}
-	}
-	
-	return min_i
+	//s.path = FindPath(s,  &geo.Vec{250, 60}, &geo.Vec{20, 60})
 }
 
 // TODO This should go to a separate Map struct
@@ -187,14 +180,16 @@ func (s *Sim) IntersectLine(ap, av *geo.Vec) bool {
 	return false
 }
 
-func (s *Sim) AddUnit(start, end Pos, color *Color) {
+func (s *Sim) AddUnit(start, end geo.Vec, color *Color) {
 	id := len(s.units)
 	unit := &unit{
 		id: id,
 		pos: start,
+		start: start,
 		end: end,
 		trail: NewRingbuffer(5),
 		color: color,
+		path: FindPath(s, &start, &end),
 	}
 	
 	s.units[id] = unit
@@ -246,7 +241,7 @@ func (s *Sim) Update() {
 				dy := math.Sin(rad)
 				dx := math.Cos(rad)
 				
-				pot := s.potential(unit, unit.pos.x+dx, unit.pos.y+dy)
+				pot := s.potential(unit, unit.pos.X+dx, unit.pos.Y+dy)
 				
 				if(pot < min) {
 					min = pot
@@ -255,12 +250,12 @@ func (s *Sim) Update() {
 			}
 			
 			d := speed*float64(dTime)
-			unit.pos.x += math.Cos(radMin)*d
-			unit.pos.y += math.Sin(radMin)*d
+			unit.pos.X += math.Cos(radMin)*d
+			unit.pos.Y += math.Sin(radMin)*d
 			
 			if last := unit.trail.Front(); last != nil {
-				lastPos := last.(Pos)
-				if(lastPos.Distance(unit.pos) >= 0.25) {
+				lastPos := last.(geo.Vec)
+				if(lastPos.Distance(&unit.pos) >= 0.25) {
 					unit.trail.AddToFront(unit.pos)
 				}
 			} else {
@@ -283,18 +278,38 @@ func (s *Sim) Update() {
 
 func (s *Sim) potential(unit *unit, x, y float64) float64 {
 	// Distance to end
-	max := 300.0
-	dist := P64(x,y).Distance(unit.end)
+	//max := 300.0
+	//dist := (&geo.Vec{x,y}).Distance(&unit.end)
 	
-	potEnd := dist/max
+	//potEnd := dist/max
+	potEnd := 1.0
+	pos := &geo.Vec{x,y}
+	
+	if unit.path != nil {
+		for e := unit.path.Front(); e.Next() != nil; e = e.Next() {
+			pt0 := e.Value.(*geo.Vec)
+			pt1 := e.Next().Value.(*geo.Vec)
+			
+			av := geo.OrthogonalVector(pt0, pt1.Sub(pt0), &geo.Vec{x, y})
+			if av != nil {
+				potEnd = math.Min(av.Len()/10.0, 1)
+			} else {
+				if l := pt0.Sub(pos).Len(); l <= 10 {
+					potEnd = math.Min(l/10.0, potEnd)	
+				} else if l := pt1.Sub(pos).Len(); l <= 10 {
+					potEnd = math.Min(l/10.0, potEnd)	
+				}
+			}
+		}
+	}
 	
 	// other units
-	MIN := 10.0
-	MAX := 15.0
+	MIN := 5.0
+	MAX := 10.0
 	potDist := 0.0
 	for _, oUnit := range s.units {
 		if(oUnit.id != unit.id) {
-			dist := oUnit.pos.Distance(P64(x,y))
+			dist := oUnit.pos.Distance(&geo.Vec{x,y})
 			potDist += 1-math2.MinMax(1, (dist-MIN)/(MAX-MIN), 0)
 		}		
 	}
@@ -306,8 +321,8 @@ func (s *Sim) potential(unit *unit, x, y float64) float64 {
 	elms := unit.trail.Elements();
 	for _, elm := range elms {
 		if(elm != nil) {
-			trailPos := elm.(Pos)
-			dist := trailPos.Distance(P64(x,y))
+			trailPos := elm.(geo.Vec)
+			dist := trailPos.Distance(&geo.Vec{x,y})
 			potTrail += 1.0-math2.MinMax(1, dist/float64(1), 0)
 		}		
 	}
@@ -338,11 +353,12 @@ func (s *Sim) Draw() {
 	
 	// Init OpenGL
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
-
+	
 	gl.Enable(gl.BLEND)
 	gl.Enable(gl.POINT_SMOOTH)
 	gl.Enable(gl.LINE_SMOOTH)
 	gl.BlendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA)
+	
 
 	gl.Begin(gl.POINTS)
 	
@@ -361,12 +377,10 @@ func (s *Sim) Draw() {
 	gl.End()
 	
 	// Draw Units
-	gl.PointSize(1)
-	gl.Begin(gl.POINTS)	
+	gl.Begin(gl.POINTS)
+	gl.Color4f(1, 0, 0, 1)	
 	for _, unit := range s.units {
-		x, y := unit.pos.ToScreen()
-		gl.Color4f(1, 0, 0, 1)
-		gl.Vertex2i(x, y)
+		gl.Vertex2f(float32(unit.pos.X), float32(unit.pos.Y))
 	}
 	
 	gl.End()
@@ -401,22 +415,38 @@ func (s *Sim) Draw() {
 			gl.Vertex2f(float32(pos.X), float32(pos.Y))
 		}
 		gl.End()
-		
-		// Draw Links
-		/*gl.Color4f(1, 0, 0, 1)
-		gl.Begin(gl.LINES)
-		for i, link := range nn.links {
-			pt1 := nn.node.Points[i]
-			pt2 := nn.node.Points[(i+1)%nn.node.Len()]
-			lineCenter := &geo.Vec{(pt1.X+pt2.X)/2, (pt1.Y+pt2.Y)/2}
-			
-			center := link.node.Center()
-			
-			gl.Vertex2d(lineCenter.X, lineCenter.Y)
-			gl.Vertex2d(center.X, center.Y)
-		}
-		gl.End()*/
 	}
+	
+	// Draw Path
+	if s.units[0].path != nil {
+		gl.Begin(gl.LINE_STRIP)
+		gl.Color4f(1, 0, 0, 0.2)
+		for e := s.units[0].path.Front(); e != nil; e = e.Next() {
+			pos := e.Value.(*geo.Vec)
+			gl.Vertex2f(float32(pos.X), float32(pos.Y))
+		}
+		gl.End()
+	}
+		
+	// Draw Links
+	/*gl.Color4f(1, 0, 0, 1)
+	gl.Begin(gl.LINES)
+	for i, link := range nn.links {
+		pt1 := nn.node.Points[i]
+		pt2 := nn.node.Points[(i+1)%nn.node.Len()]
+		lineCenter := &geo.Vec{(pt1.X+pt2.X)/2, (pt1.Y+pt2.Y)/2}
+		
+		center := link.node.Center()
+		
+		gl.Vertex2d(lineCenter.X, lineCenter.Y)
+		gl.Vertex2d(center.X, center.Y)
+	}
+	gl.End()*/
+	
+	
+	
+	
+	
 	
 	/*
 	fps := 1/(float64(time.Since(start))/float64(time.Second))
@@ -436,18 +466,15 @@ func (s *Sim) Run() {
 			case *sdl.KeyboardEvent:
 				if ev.Keysym.Sym == sdl.K_ESCAPE {
 					s.ui.running = false
+				} else if ev.Keysym.Sym == sdl.K_SPACE {
+					go s.Update()
 				}
-			/*case *sdl.MouseMotionEvent:
-				if ev.State != 0 {
-					pen.lineTo(Point{int(ev.X), int(ev.Y)})
-				} else {
-					pen.moveTo(Point{int(ev.X), int(ev.Y)})
-				}*/
 			}
 		}
 		
-		s.Draw()
-
+		
+		s.Draw()	
+	
 		sdl.GL_SwapBuffers()
 		
 		fps := 1/(float64(time.Since(start))/float64(time.Second))

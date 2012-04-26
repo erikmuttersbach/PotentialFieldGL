@@ -3,6 +3,7 @@ package main
 import (
 	"pf"
 	"fmt"
+	"geo"
 )
 
 func main() {
@@ -18,14 +19,14 @@ func main() {
 	//sim.AddBuilding(50, 150, 100, 50)
 	//sim.AddBuilding(50, 25, 100, 25)
 	
-	sim.AddUnit(pf.P(200, 100), pf.P(0, 100), black)
-	//sim.AddUnit(pf.P(200, 110), pf.P(0, 120), blue)
+	sim.Init()
+	
+	// TODO if the target point is on the corner of a poly, an error occurrs
+	sim.AddUnit(geo.Vec{200, 100}, geo.Vec{1, 100}, black)
 	
 	for i:=0; i<10; i++ {
-		sim.AddUnit(pf.P(200, 80+i*5), pf.P(0, 100), black)
+		sim.AddUnit(geo.Vec{200, 80.0+float64(i)*10.0}, geo.Vec{1, 100}, black)
 	}
-	
-	sim.Init()
 	
 	fmt.Println("Starting sim")
 	//go sim.Update()
