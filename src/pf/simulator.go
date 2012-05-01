@@ -41,6 +41,7 @@ type Sim struct {
 	ui *UI
 	
 	run bool
+	running bool
 }
 
 type Color struct {
@@ -66,6 +67,7 @@ func NewSim() *Sim {
 		run: false,
 		nav: nil,
 		markedNodes: make(map[*NavNode]bool),
+		running: false,
 	}
 	
 	// Init static potential field
@@ -253,6 +255,7 @@ func (s *Sim) Update() {
 			unit.pos.X += math.Cos(radMin)*d
 			unit.pos.Y += math.Sin(radMin)*d
 			
+			// Add position to trail if more than 0.25 units away
 			if last := unit.trail.Front(); last != nil {
 				lastPos := last.(geo.Vec)
 				if(lastPos.Distance(&unit.pos) >= 0.25) {
@@ -260,6 +263,15 @@ func (s *Sim) Update() {
 				}
 			} else {
 				unit.trail.AddToFront(unit.pos)
+			}
+			
+			// if the unit already walks at the next path piece, forget the current front one
+			if unit.path.Len() > 2 {
+				pt1 := unit.path.Front().Next().Value.(*geo.Vec)
+				pt2 := unit.path.Front().Next().Next().Value.(*geo.Vec)
+				if geo.OrthogonalVector(pt1, pt2.Sub(pt1), &unit.pos) != nil {
+					unit.path.Remove(unit.path.Front())
+				}
 			}
 		}
 		
@@ -300,6 +312,7 @@ func (s *Sim) potential(unit *unit, x, y float64) float64 {
 					potEnd = math.Min(l/10.0, potEnd)	
 				}
 			}
+			
 		}
 	}
 	
@@ -333,7 +346,7 @@ func (s *Sim) potential(unit *unit, x, y float64) float64 {
 		//fmt.Println(potDist)
 	}
 
-	pot := 0.5*potEnd+0.1*potDist + 0.4*potTrail
+	pot := 0.5*potEnd+0*potDist + 0.25*potTrail
 	
 	xd := int(x)
 	yd := int(y)
@@ -377,15 +390,21 @@ func (s *Sim) Draw() {
 	gl.End()
 	
 	// Draw Units
-	gl.Begin(gl.POINTS)
-	gl.Color4f(1, 0, 0, 1)	
-	for _, unit := range s.units {
+	gl.Begin(gl.POINTS)	
+	for i, unit := range s.units {
+		if i == 0 {
+			gl.Color4f(1, 0, 0, 1)	
+			fmt.Println(unit.pos.X)
+		} else {
+			gl.Color4f(0, 1, 0, 1)
+		}
+		
 		gl.Vertex2f(float32(unit.pos.X), float32(unit.pos.Y))
 	}
-	
 	gl.End()
 	
 	// Nav mesh
+	/*
 	for e := s.nav.nodes.Front(); e != nil; e = e.Next() {
 		nn := e.Value.(*NavNode)
 
@@ -416,7 +435,7 @@ func (s *Sim) Draw() {
 		}
 		gl.End()
 	}
-	
+	*/
 	// Draw Path
 	if s.units[0].path != nil {
 		gl.Begin(gl.LINE_STRIP)
@@ -467,7 +486,10 @@ func (s *Sim) Run() {
 				if ev.Keysym.Sym == sdl.K_ESCAPE {
 					s.ui.running = false
 				} else if ev.Keysym.Sym == sdl.K_SPACE {
-					go s.Update()
+					if !s.running {
+						s.running = true
+						go s.Update()
+					}
 				}
 			}
 		}
